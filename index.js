@@ -2,6 +2,11 @@ const fs = require('fs');
 const http = require('http');
 const url = require('url');
 
+const slugify = require('slugify');
+
+//OWN modules
+const replaceTemplate = require('./modules/replaceTemplate');
+
 /**
  * FILE
  */
@@ -40,22 +45,6 @@ const url = require('url');
  * SERVER
  */
 
-const replaceTemplate = (temp, product) => {
-  let output = temp.replace(/{%PRODUCTNAME%}/g, product.productName);
-  output = output.replace(/{%IMAGE%}/g, product.image);
-  output = output.replace(/{%PRICE%}/g, product.price);
-  output = output.replace(/{%FROM%}/g, product.from);
-  output = output.replace(/{%NUTRIENTS%}/g, product.nutrients);
-  output = output.replace(/{%QUANTITY%}/g, product.quantity);
-  output = output.replace(/{%DESCRIPTION%}/g, product.description);
-  output = output.replace(/{%ID%}/g, product.id);
-
-  if (!product.organic)
-    output = output.replace(/{%NOT_ORGANIC%}/g, 'not-organic');
-
-  return output;
-};
-
 const tempOverview = fs.readFileSync(
   `${__dirname}/templates/template-overview.html`,
   'utf-8'
@@ -68,19 +57,24 @@ const tempProduct = fs.readFileSync(
   `${__dirname}/templates/template-product.html`,
   'utf-8'
 );
-
 const data = fs.readFileSync(`${__dirname}/dev-data/data.json`, 'utf-8');
 const dataObject = JSON.parse(data);
 
+const slugs = dataObject.map(data => {
+  return {
+    ...data,
+    slug: slugify(data.productName, { lower: true })
+  };
+});
+
 const server = http.createServer((req, res) => {
   const { query, pathname } = url.parse(req.url, true);
+  const item = pathname.replace('/product/', '');
 
   //overpage or homepage
   if (pathname === '/' || pathname === '/overview') {
     res.writeHead(200, { 'Content-type': 'text/html' });
-    const cardsHTML = dataObject
-      .map(el => replaceTemplate(tempCard, el))
-      .join('');
+    const cardsHTML = slugs.map(el => replaceTemplate(tempCard, el)).join('');
     const output = tempOverview.replace('{%PRODUCT_CARDS%}', cardsHTML);
 
     res.end(output);
@@ -91,12 +85,21 @@ const server = http.createServer((req, res) => {
     res.end(data);
   }
   //PRODUCT PAGE
-  else if (pathname === '/product') {
-    const product = dataObject[query.id];
-    res.writeHead(200, { 'Content-type': 'text/html' });
-    const output = replaceTemplate(tempProduct, product);
+  else if (pathname === `/product/${item}`) {
+    const product = slugs.find(data => data['slug'] === item);
 
-    res.end(output);
+    if (product) {
+      res.writeHead(200, { 'Content-type': 'text/html' });
+      const output = replaceTemplate(tempProduct, product);
+
+      res.end(output);
+    } else {
+      res.writeHead(404, {
+        'Content-type': 'text/html',
+        'my-own-header': 'hello-world'
+      }); //show be send before respond content end
+      res.end('<h1>Product not found!</h1>');
+    }
   }
   //NOT FOUND
   else {
@@ -104,7 +107,7 @@ const server = http.createServer((req, res) => {
       'Content-type': 'text/html',
       'my-own-header': 'hello-world'
     }); //show be send before respond content end
-    res.end('<h1>Page not found!</h1>');
+    res.end('<h1>404! Page not found!</h1>');
   }
 });
 
